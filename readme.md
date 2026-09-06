@@ -135,30 +135,71 @@ python3 -m venv .venv && source .venv/bin/activate
 **Windows (PowerShell):**
 ```powershell
 py -3.11 -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass   # see note below
 .venv\Scripts\Activate.ps1
-# if PowerShell blocks the script:
-#   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-Then, on every platform — **install the CUDA build of PyTorch first**, because
-the default PyPI wheel on Windows is CPU-only and will silently train ~50×
-slower:
+> **`Activate.ps1 cannot be loaded because running scripts is disabled`**
+>
+> Windows blocks PowerShell scripts by default; a fresh install hits this every
+> time. Neither fix below needs administrator rights.
+>
+> - `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` — applies to
+>   that terminal only and reverts when you close it. Narrowest change; you
+>   repeat it each new terminal.
+> - `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` —
+>   persists for your account. Microsoft's recommended setting: local scripts
+>   run, downloaded ones still require a signature.
+>
+> **Or skip activation entirely.** The virtualenv's interpreter works when
+> called directly, no policy change involved:
+>
+> ```powershell
+> .venv\Scripts\python.exe -m pip install -r requirements.txt
+> .venv\Scripts\python.exe tools\train.py --config configs\a4000_stage1.yaml
+> ```
+>
+> From `cmd.exe` rather than PowerShell, `.venv\Scripts\activate.bat` is a
+> batch file and is not affected by the policy at all.
+
+Then install PyTorch. **On Windows the default PyPI wheel is CPU-only** — it is
+about 124 MB, where a CUDA build is 2–3 GB — so it installs cleanly and then
+trains at roughly 1% of the speed while merely looking "slow". Get the right
+wheel from PyTorch's own index:
+
+1. Open **[pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/)**
+   and pick Stable / your OS / Pip / Python / CUDA. It prints the exact command.
+2. Run it, then `pip install -r requirements.txt`.
+
+Do not copy a `--index-url .../whl/cuXXX` from a blog post or from this file:
+the CUDA version moves with each PyTorch release (2.14 bundles CUDA 13.0), and a
+stale index either has no matching wheel or silently gives you an old PyTorch.
+The selector is the only source that stays correct.
 
 ```bash
 pip install --upgrade pip
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# ... the command the selector gave you ...
 pip install -r requirements.txt
 ```
 
-Confirm the GPU is actually being used — not just present:
+**Then verify — this is the step that matters:**
 
 ```bash
 python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-Expect `True` and `NVIDIA RTX A4000`. **If it prints `False`, stop and fix it**
-— training will otherwise run on CPU at roughly 1% of the speed and appear
-merely "slow" rather than misconfigured.
+Expect `True` and `NVIDIA RTX A4000`. **If it prints `False`, stop and fix it
+before going further.**
+
+- Installed the plain PyPI wheel on Windows → reinstall from the selector's
+  index (`pip uninstall torch torchvision` first).
+- Installed a CUDA wheel and still `False` → your **driver is older than the
+  CUDA build**. Either update the driver, or pick an older CUDA version in the
+  selector; `nvidia-smi` shows the maximum CUDA version your driver supports in
+  its top-right corner.
+
+**You do not need the CUDA Toolkit installed separately** — the wheel bundles
+its own runtime. Only the driver has to be new enough.
 
 ### Step 2 — Verify the install
 
@@ -317,11 +358,12 @@ Then open a pull request into `main`, or merge locally with `git merge --no-ff`.
 
 | Symptom | Cause and fix |
 |---|---|
-| `torch.cuda.is_available()` is `False` | CPU-only wheel. Reinstall with `--index-url https://download.pytorch.org/whl/cu124` |
+| `torch.cuda.is_available()` is `False` | CPU-only wheel (the Windows PyPI default), or a driver older than the wheel's CUDA version. Reinstall from [the PyTorch selector](https://pytorch.org/get-started/locally/); check `nvidia-smi` for your driver's max CUDA |
 | `CUDA out of memory` | Lower `crop_size` first, then `backbone_width`, then `batch_size`. **Keep `clip_len >= 3`** — it is load-bearing for the tracking loss |
 | GPU utilisation < 40% | Dataloader-bound. Raise `workers`; if already at core count, lower `crop_size` |
-| Training crawls, GPU idle | Almost always the CPU-only wheel — recheck Step 1 |
+| Training crawls, GPU idle | Almost always the CPU-only wheel — recheck Step 1's verify command |
 | `no TrueType fonts found` | Should not happen (matplotlib fallback). If it does, drop `.ttf` files into `~/.fonts` |
+| Windows: `Activate.ps1 cannot be loaded` | PowerShell execution policy. `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, or call `.venv\Scripts\python.exe` directly. No admin needed — see Step 1 |
 | Windows: `symlink` / WinError 1314 | Already handled — see the note in Step 3 |
 | Windows: DataLoader hangs at start | Set `workers: 0` in the config to confirm, then raise gradually; Windows spawns rather than forks, so worker startup is much slower |
 
