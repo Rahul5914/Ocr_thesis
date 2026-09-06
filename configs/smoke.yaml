@@ -1,0 +1,23 @@
+# Tiny config for verifying the pipeline runs (CPU, ~1 minute).
+#   python tools/train.py --config configs/smoke.yaml --device cpu
+seed: 0
+charset: alnum
+model: {backbone_width: 16, backbone_layers: [1,1,1,1], fpn_channels: 64,
+        rec_dim: 64, rec_layers: 1, max_text_len: 10}
+data:
+  type: synth_video
+  length: 32
+  synth: {width: 320, height: 192, num_frames: 4, min_instances: 3, max_instances: 6}
+  clip: {clip_len: 2, max_text_len: 10}
+  aug: {crop_size: [192,192], short_side: 192, max_long_side: 320}
+train:
+  epochs: 2
+  batch_size: 2
+  workers: 0
+  lr: 0.001
+  warmup_steps: 5
+  amp: false
+  ema_decay: 0.0
+  log_every: 5
+  ckpt_dir: checkpoints/smoke
+  weighting: {type: fixed, weights: {loss_det: 1.0, loss_rec: 1.0, loss_track: 0.5}}

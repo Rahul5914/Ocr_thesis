@@ -1,0 +1,62 @@
+# Stage 1 -- synthetic still images.
+#
+# Purpose: learn strokes, characters and dense text/background separation.  This
+# is the replacement for ImageNet initialisation, so it must run long enough to
+# actually produce good low-level features -- treat 100k-300k images as the
+# minimum, not 10k.  Tracking is inactive here (clips are length 1).
+seed: 0
+charset: alnum
+case_sensitive: false
+
+model:
+  backbone_width: 48
+  backbone_layers: [2, 2, 2, 2]
+  norm: gn
+  fpn_channels: 256
+  rec_dim: 256
+  rec_layers: 2
+  embed_dim: 128
+  use_attention_branch: true      # GTC guidance; dropped at inference
+  roi_jitter: 0.05
+  max_text_len: 25
+
+data:
+  type: synth_static
+  length: 200000
+  background_dir: null            # point at a directory of photos to narrow the domain gap
+  synth:
+    width: 640
+    height: 640
+    min_words: 6
+    max_words: 24
+    min_font_size: 10
+    max_font_size: 56
+    curve_prob: 0.25
+    rotate_prob: 0.6
+    perspective_prob: 0.3
+  clip:
+    clip_len: 1
+    max_text_len: 25
+    num_control_points: 8
+  aug:
+    crop_size: [640, 640]
+    short_side: 640
+    scale_range: [0.7, 1.6]
+    rotate_deg: 8.0
+    text_crop_prob: 0.85
+
+train:
+  epochs: 20
+  batch_size: 8
+  workers: 8
+  lr: 0.001
+  weight_decay: 0.01
+  warmup_steps: 2000              # non-negotiable from random init
+  scheduler: cosine
+  grad_clip: 1.0
+  amp: true
+  ema_decay: 0.999
+  ckpt_dir: checkpoints/stage1_static
+  weighting:
+    type: fixed
+    weights: {loss_det: 1.0, loss_rec: 1.0, loss_track: 0.0}

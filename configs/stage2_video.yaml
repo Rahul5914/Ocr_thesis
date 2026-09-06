@@ -1,0 +1,65 @@
+# Stage 2 -- synthetic video clips.  Start from stage 1:
+#   python tools/train.py --config configs/stage2_video.yaml \
+#       --init checkpoints/stage1_static/last.pt
+#
+# Purpose: learn association, motion blur robustness and object permanence.  The
+# tracking loss switches on here and needs clip_len >= 3 to have any long-range
+# positives at all.
+seed: 0
+charset: alnum
+case_sensitive: false
+
+model:
+  backbone_width: 48
+  backbone_layers: [2, 2, 2, 2]
+  norm: gn
+  fpn_channels: 256
+  rec_dim: 256
+  rec_layers: 2
+  embed_dim: 128
+  use_attention_branch: true
+  roi_jitter: 0.08
+  max_text_len: 25
+
+data:
+  type: synth_video
+  length: 60000
+  background_dir: null
+  synth:
+    width: 960
+    height: 540
+    num_frames: 12
+    min_instances: 6
+    max_instances: 20
+    cam_translate: 6.0
+    cam_rotate: 0.6
+    instance_prob_moving: 0.4
+    motion_blur: true
+    num_occluders: 2
+    occluder_prob: 0.6
+  clip:
+    clip_len: 4
+    frame_stride: 2
+    random_stride: true
+    max_text_len: 25
+  aug:
+    crop_size: [640, 640]
+    short_side: 640
+    scale_range: [0.6, 1.6]
+    rotate_deg: 6.0
+    frame_jitter_px: 2.0
+
+train:
+  epochs: 15
+  batch_size: 2                   # 2 clips x 4 frames = 8 images per step
+  workers: 8
+  lr: 0.0005
+  warmup_steps: 1000
+  scheduler: cosine
+  grad_clip: 1.0
+  amp: true
+  ema_decay: 0.999
+  ckpt_dir: checkpoints/stage2_video
+  weighting:
+    type: fixed
+    weights: {loss_det: 1.0, loss_rec: 1.0, loss_track: 0.5}

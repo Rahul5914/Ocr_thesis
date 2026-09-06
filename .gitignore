@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Training and data artefacts -- never commit these.
+# Anchored with a leading slash: a bare `data/` would also match the source
+# package vtspot/data/ and silently exclude it from the repository.
+/checkpoints/
+/data/
+/runs/
+*.pt
+*.pth
+*.mp4
+*.avi
