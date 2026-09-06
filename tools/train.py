@@ -58,11 +58,18 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+# Keys consumed directly by this script rather than by a dataclass.  Without
+# this, _sub() reports them as "ignored" even though they are read a few lines
+# later -- a warning that tells the user their batch size is being dropped when
+# it is not.
+_CONSUMED_ELSEWHERE = {"train": {"batch_size", "workers"}}
+
+
 def _sub(cls, cfg: dict, key: str):
-    """Build a dataclass from the sub-dict at ``cfg[key]``, ignoring unknown keys."""
+    """Build a dataclass from the sub-dict at ``cfg[key]``, warning on typos."""
     fields = {f.name for f in cls.__dataclass_fields__.values()}
     raw = cfg.get(key, {}) or {}
-    unknown = set(raw) - fields
+    unknown = set(raw) - fields - _CONSUMED_ELSEWHERE.get(key, set())
     if unknown:
         print(f"[warn] ignoring unknown {key} keys: {sorted(unknown)}")
     return cls(**{k: v for k, v in raw.items() if k in fields})
