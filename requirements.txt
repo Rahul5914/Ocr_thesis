@@ -1,0 +1,17 @@
+# Core
+torch>=2.0
+torchvision>=0.15
+numpy>=1.24
+opencv-python-headless>=4.8
+Pillow>=9.5
+scipy>=1.10           # Hungarian assignment (linear_sum_assignment)
+shapely>=2.0          # polygon IoU
+pyclipper>=1.3        # polygon offsetting (DB shrink / unclip)
+PyYAML>=6.0
+tqdm>=4.65
+
+# Tests
+pytest>=7.0
+
+# Fonts for the synthetic generator are discovered from the system.
+# On a bare Linux image: apt-get install fonts-dejavu fonts-liberation fonts-freefont-ttf

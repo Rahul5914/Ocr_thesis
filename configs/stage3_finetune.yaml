@@ -1,0 +1,53 @@
+# Stage 3 -- real annotated video.  Start from stage 2:
+#   python tools/train.py --config configs/stage3_finetune.yaml \
+#       --init checkpoints/stage2_video/last.pt
+#
+# Low LR and few epochs: the annotated corpora are small (ICDAR15-video is 25
+# training videos) and this stage overfits within a handful of passes.  The job
+# here is domain adaptation, not learning the task.
+seed: 0
+charset: alnum
+case_sensitive: false
+
+model:
+  backbone_width: 48
+  backbone_layers: [2, 2, 2, 2]
+  norm: gn
+  fpn_channels: 256
+  rec_dim: 256
+  rec_layers: 2
+  embed_dim: 128
+  use_attention_branch: true
+  roi_jitter: 0.08
+  max_text_len: 25
+
+data:
+  type: real_video
+  root: data/prepared/icdar15_video_train
+  clip:
+    clip_len: 4
+    frame_stride: 2
+    random_stride: true
+    max_text_len: 25
+  aug:
+    crop_size: [640, 640]
+    short_side: 640
+    scale_range: [0.7, 1.4]
+    rotate_deg: 5.0
+
+train:
+  epochs: 30
+  batch_size: 2
+  workers: 6
+  lr: 0.0001                      # 10x lower than stage 2
+  warmup_steps: 200
+  scheduler: cosine
+  grad_clip: 1.0
+  amp: true
+  ema_decay: 0.999
+  ckpt_dir: checkpoints/stage3_finetune
+  weighting:
+    type: uncertainty             # losses are all descending by now, so this is safe
+    tasks: [loss_det, loss_rec, loss_track]
+    s_min: -3.0
+    s_max: 3.0
