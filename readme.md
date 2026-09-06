@@ -35,6 +35,11 @@ python tools/train.py --config configs/smoke.yaml --device cpu   # ~1 min, verif
 python tools/train.py --config configs/stage1_static.yaml        # real training
 ```
 
+Runs on any 16 GB GPU. For a lab server over SSH (recommended — no session
+limit) use `configs/a4000_*.yaml`; for Colab or Kaggle open
+`notebooks/train_colab_kaggle.ipynb`. See
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
 **No dataset download is needed to start.** Training data is generated
 procedurally — ~17 still images/s and ~34 video frames/s on one CPU core, with
 exact polygon and track-id ground truth, curved text, motion blur and occlusion.
@@ -95,8 +100,10 @@ vtspot/
   engine/      trainer, schedulers
   predictor.py end-to-end video inference
 tools/         train, evaluate, predict_video, prepare_dataset
-configs/       stage1_static, stage2_video, stage3_finetune, smoke
-docs/          RESEARCH_REVIEW, DATASETS, TRAINING_GUIDE
+configs/       stage{1,2,3}, plus a4000_* (16 GB server) and colab_* variants
+notebooks/     train_colab_kaggle.ipynb
+scripts/       train_slurm.sh
+docs/          RESEARCH_REVIEW, DATASETS, TRAINING_GUIDE, DEPLOYMENT
 tests/         100 tests
 ```
 
@@ -108,6 +115,8 @@ tests/         100 tests
   prepare them
 - [`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md) — the curriculum, reading
   loss curves, hardware, ablations worth running
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — SSH server, SLURM, Colab and
+  Kaggle, with measured memory figures
 
 ## Status
 

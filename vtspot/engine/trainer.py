@@ -31,10 +31,12 @@ class TrainConfig:
     scheduler: str = "cosine"
     grad_clip: float = 1.0
     amp: bool = True
+    amp_dtype: str = "bf16"         # "bf16" on Ampere+ (A4000, A100, RTX 30/40), else "fp16"
     ema_decay: float = 0.999
     log_every: int = 20
     ckpt_dir: str = "checkpoints"
     save_every: int = 1
+    keep_last_n: int = 3            # prune older epoch checkpoints; 0 keeps all
     attn_weight: float = 0.5
     db_k_warmup_steps: int = 2000   # steps to ramp the DB steepness k to its final value
     weighting: dict = field(default_factory=lambda: {
@@ -95,8 +97,22 @@ class Trainer:
         params += [{"params": list(self.weighting.parameters()), "weight_decay": 0.0}]
         self.optimizer = torch.optim.AdamW(params, lr=cfg.lr, betas=(0.9, 0.999))
         self.scheduler = None
+        # bfloat16 has fp32's exponent range, so it cannot overflow the way
+        # fp16 does and needs no loss scaling.  On Ampere and later (A4000,
+        # A100, RTX 30/40) it is the better default: same speed as fp16, none of
+        # the "loss went inf at step 300" failure mode -- which matters more
+        # than usual here, since a from-scratch run has large early gradients.
+        self.amp_dtype = {"bf16": torch.bfloat16, "fp16": torch.float16,
+                          "fp32": torch.float32}.get(cfg.amp_dtype, torch.bfloat16)
+        if (self.amp_dtype is torch.bfloat16 and self.device.type == "cuda"
+                and not torch.cuda.is_bf16_supported()):
+            print("[warn] bf16 unsupported on this GPU, falling back to fp16")
+            self.amp_dtype = torch.float16
+        # GradScaler is only meaningful for fp16.
         self.scaler = torch.amp.GradScaler(
-            self.device.type, enabled=cfg.amp and self.device.type == "cuda")
+            self.device.type,
+            enabled=cfg.amp and self.device.type == "cuda"
+            and self.amp_dtype is torch.float16)
         self.ema = ModelEMA(self.model, cfg.ema_decay) if cfg.ema_decay > 0 else None
         self.step = 0
         self.epoch = 0
@@ -175,6 +191,7 @@ class Trainer:
             (ckpt_dir / "history.json").write_text(json.dumps(history, indent=2))
             if (epoch + 1) % cfg.save_every == 0:
                 self.save(ckpt_dir / f"epoch_{epoch:04d}.pt")
+                self._prune_checkpoints(ckpt_dir)
             self.save(ckpt_dir / "last.pt")
         return history[-1] if history else {}
 
@@ -183,8 +200,10 @@ class Trainer:
         if self.cfg.db_k_warmup_steps > 0:
             self.model.det_head.set_k_progress(self.step / self.cfg.db_k_warmup_steps)
         self.optimizer.zero_grad(set_to_none=True)
-        amp_enabled = self.cfg.amp and self.device.type == "cuda"
-        with torch.amp.autocast(self.device.type, enabled=amp_enabled):
+        amp_enabled = (self.cfg.amp and self.device.type == "cuda"
+                       and self.amp_dtype is not torch.float32)
+        with torch.amp.autocast(self.device.type, dtype=self.amp_dtype,
+                                enabled=amp_enabled):
             out = self.model(batch)
             losses = self.compute_losses(batch, out)
             total, weights = self.weighting(losses)
@@ -220,6 +239,22 @@ class Trainer:
         return stats
 
     # -- checkpoints -----------------------------------------------------
+    def _prune_checkpoints(self, ckpt_dir: Path) -> None:
+        """Keep only the newest ``keep_last_n`` epoch checkpoints.
+
+        Each one is ~195 MB (weights + optimizer state + EMA).  A 20-epoch stage
+        writes 3.9 GB, which overruns a free Google Drive and Kaggle's working
+        directory quota.  ``last.pt`` is never pruned, so --resume always works.
+        """
+        if self.cfg.keep_last_n <= 0:
+            return
+        epochs = sorted(ckpt_dir.glob("epoch_*.pt"))
+        for old in epochs[: max(len(epochs) - self.cfg.keep_last_n, 0)]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
     def save(self, path: str | Path) -> None:
         payload = {
             "model": self.model.state_dict(),

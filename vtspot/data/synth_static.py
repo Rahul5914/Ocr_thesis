@@ -42,6 +42,25 @@ FONT_SEARCH_DIRS = [
     "/System/Library/Fonts", str(Path.home() / ".fonts"),
 ]
 
+
+def _matplotlib_font_dir() -> Optional[str]:
+    """matplotlib bundles ~40 DejaVu TTFs and is preinstalled on Colab and Kaggle.
+
+    Those images can otherwise ship with no system fonts at all, which would
+    make the synthetic generator -- the entire stage-1 corpus -- unusable with a
+    bare "no TrueType fonts found".  Falling back to matplotlib's bundle means
+    the pipeline runs out of the box there.  A real font collection is still
+    better: 40 faces is enough to train, but font diversity is one of the
+    cheapest ways to improve recognition generalisation, so install
+    `fonts-dejavu fonts-liberation fonts-freefont-ttf` when you can.
+    """
+    try:
+        import matplotlib
+    except Exception:
+        return None
+    d = Path(matplotlib.get_data_path()) / "fonts" / "ttf"
+    return str(d) if d.is_dir() else None
+
 # A small built-in lexicon keeps synthetic transcriptions word-like rather than
 # uniform random noise.  Real text has structure (digraph frequencies, word
 # lengths) and a recogniser trained only on uniform strings learns no useful
@@ -61,9 +80,13 @@ DIGIT_PATTERNS = ["{d}{d}", "{d}{d}{d}", "{d}{d}:{d}{d}", "{d}{d}.{d}{d}",
 
 
 def discover_fonts(extra_dirs: Sequence[str] = ()) -> List[str]:
-    """All usable TTF/OTF files on this machine."""
+    """All usable TTF/OTF files on this machine, matplotlib's bundle included."""
     fonts: List[str] = []
-    for d in list(FONT_SEARCH_DIRS) + list(extra_dirs):
+    search = list(FONT_SEARCH_DIRS) + list(extra_dirs)
+    mpl_dir = _matplotlib_font_dir()
+    if mpl_dir:
+        search.append(mpl_dir)
+    for d in search:
         p = Path(d)
         if not p.is_dir():
             continue

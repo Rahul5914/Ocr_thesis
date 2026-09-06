@@ -1,0 +1,63 @@
+# Stage 2 tuned for a free Colab T4 / Kaggle P100.
+#   python tools/train.py --config configs/colab_stage2.yaml \
+#       --init /content/drive/MyDrive/vtspot/stage1/last.pt
+#
+# clip_len stays at 4: below 3 the contrastive loss has no meaningful long-range
+# positives and the tracking head learns nothing.  Batch size absorbs the cost
+# instead -- 2 clips x 4 frames is 8 images per step, same as stage 1.
+seed: 0
+charset: alnum
+case_sensitive: false
+
+model:
+  backbone_width: 32
+  backbone_layers: [2, 2, 2, 2]
+  norm: gn
+  fpn_channels: 256
+  rec_dim: 256
+  rec_layers: 2
+  embed_dim: 128
+  use_attention_branch: true
+  roi_jitter: 0.08
+  max_text_len: 25
+
+data:
+  type: synth_video
+  length: 60000
+  background_dir: null
+  synth:
+    width: 640
+    height: 384
+    num_frames: 12
+    min_instances: 5
+    max_instances: 16
+    motion_blur: true
+    num_occluders: 2
+    occluder_prob: 0.6
+  clip:
+    clip_len: 4
+    frame_stride: 2
+    random_stride: true
+    max_text_len: 25
+  aug:
+    crop_size: [512, 512]
+    short_side: 512
+    scale_range: [0.6, 1.6]
+    rotate_deg: 6.0
+
+train:
+  epochs: 30
+  steps_per_epoch: 400
+  batch_size: 2
+  workers: 2
+  lr: 0.0005
+  warmup_steps: 1000
+  scheduler: cosine
+  grad_clip: 1.0
+  amp: true
+  ema_decay: 0.999
+  keep_last_n: 3
+  ckpt_dir: /content/drive/MyDrive/vtspot/stage2
+  weighting:
+    type: fixed
+    weights: {loss_det: 1.0, loss_rec: 1.0, loss_track: 0.5}
