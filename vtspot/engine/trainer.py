@@ -37,6 +37,10 @@ class TrainConfig:
     ckpt_dir: str = "checkpoints"
     save_every: int = 1
     keep_last_n: int = 3            # prune older epoch checkpoints; 0 keeps all
+    save_every_steps: int = 1000    # mid-epoch crash safety; 0 disables
+    # An epoch of the stage-1 config is 25k steps -- hours of work.  Saving only
+    # at epoch boundaries means a reboot early in a long run loses everything,
+    # and the first checkpoint does not exist until hours in.
     attn_weight: float = 0.5
     db_k_warmup_steps: int = 2000   # steps to ramp the DB steepness k to its final value
     weighting: dict = field(default_factory=lambda: {
@@ -176,11 +180,24 @@ class Trainer:
                 for k, v in stats.items():
                     running[k] = running.get(k, 0.0) + v
                 seen += 1
+                if cfg.save_every_steps and self.step % cfg.save_every_steps == 0:
+                    self.save(ckpt_dir / "last.pt")
+
                 if self.step % cfg.log_every == 0:
                     msg = " ".join(f"{k}={v / seen:.4f}" for k, v in sorted(running.items())
                                    if k.startswith("loss"))
                     lr = self.optimizer.param_groups[0]["lr"]
-                    print(f"[e{epoch} s{self.step}] lr={lr:.2e} {msg}", flush=True)
+                    # Throughput and ETA.  On a multi-day run these are the two
+                    # numbers you actually need, and until now the log carried
+                    # neither -- with 25k steps per epoch, history.json (written
+                    # per epoch) gives no feedback for hours.
+                    rate = seen / max(time.time() - t0, 1e-6)
+                    done = epoch * steps_per_epoch + i + 1
+                    remaining = max(total_steps - done, 0)
+                    eta_h = remaining / rate / 3600 if rate > 0 else float("inf")
+                    pct = 100.0 * done / max(total_steps, 1)
+                    print(f"[e{epoch} s{self.step}] {pct:5.1f}% {rate:.2f}it/s "
+                          f"eta={eta_h:.1f}h lr={lr:.2e} {msg}", flush=True)
 
             summary = {k: v / max(seen, 1) for k, v in running.items()}
             summary["epoch"] = epoch
