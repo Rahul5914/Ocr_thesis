@@ -1,0 +1,75 @@
+# Stage 1, sized to finish in about a day rather than ten.
+#
+# The default a4000_stage1.yaml is 625,000 steps (7.5M images) -- "as good as it
+# gets".  Measured on a real A4000 that came out at ~230 h, which is not a
+# sensible budget for a thesis.  This config targets ~150,000 steps and keeps
+# the parts that matter:
+#
+#   crop 512 not 640   -- 1.56x fewer pixels per step.  short_side stays 640, so
+#                         text is the same size in pixels; each sample just
+#                         covers less area.  Small-text fidelity is preserved,
+#                         which is the whole point of the stride-4 pyramid.
+#   max_words 16       -- synthesis measured 10.1 img/s/core at 24 words versus
+#                         15.5 at 12; this is the middle ground.  Only helps if
+#                         you are dataloader-bound -- run tools/benchmark.py.
+#   steps_per_epoch    -- 2,500 instead of 25,000, so a checkpoint and a history
+#                         entry land every ~30 min instead of every few hours.
+#
+# 60 x 2,500 = 150,000 steps = 1.8M images.  That is a real stage 1; the
+# difference against 7.5M is the top of the curve, not the body of it.
+seed: 0
+charset: alnum
+case_sensitive: false
+
+model:
+  backbone_width: 48
+  backbone_layers: [2, 2, 2, 2]
+  norm: gn
+  fpn_channels: 256
+  rec_dim: 256
+  rec_layers: 2
+  embed_dim: 128
+  use_attention_branch: true
+  roi_jitter: 0.05
+  max_text_len: 25
+
+data:
+  type: synth_static
+  length: 300000
+  background_dir: null
+  synth:
+    width: 640
+    height: 640
+    min_words: 5
+    max_words: 16
+    min_font_size: 10
+    max_font_size: 56
+    curve_prob: 0.25
+  clip:
+    clip_len: 1
+    max_text_len: 25
+  aug:
+    crop_size: [512, 512]
+    short_side: 640          # unchanged: keeps text the same pixel size
+    scale_range: [0.7, 1.6]
+    rotate_deg: 8.0
+
+train:
+  epochs: 60
+  steps_per_epoch: 2500
+  batch_size: 12
+  workers: 6
+  lr: 0.001
+  weight_decay: 0.01
+  warmup_steps: 2000
+  scheduler: cosine
+  grad_clip: 1.0
+  amp: true
+  amp_dtype: bf16
+  ema_decay: 0.999
+  keep_last_n: 3
+  save_every_steps: 500
+  ckpt_dir: checkpoints/a4000_stage1
+  weighting:
+    type: fixed
+    weights: {loss_det: 1.0, loss_rec: 1.0, loss_track: 0.0}
