@@ -1,0 +1,63 @@
+# Stage 1 tuned for a free Colab T4 / Kaggle P100 (16 GB VRAM, 2-4 CPU cores).
+#
+# Differences from configs/stage1_static.yaml, and why:
+#   workers 2      -- Colab free gives 2 cores; 8 workers thrash and slow it down
+#   steps_per_epoch-- bounded epochs so checkpoints land before a session times out
+#   keep_last_n 3  -- 195 MB per checkpoint; 20 unpruned epochs is 3.9 GB
+#   crop 512       -- fits alongside a browser and leaves headroom on a shared T4
+#
+# Sessions cap at ~12 h, so run this repeatedly with --resume; each invocation
+# picks up where the last left off.
+seed: 0
+charset: alnum
+case_sensitive: false
+
+model:
+  backbone_width: 32
+  backbone_layers: [2, 2, 2, 2]
+  norm: gn
+  fpn_channels: 256
+  rec_dim: 256
+  rec_layers: 2
+  embed_dim: 128
+  use_attention_branch: true
+  roi_jitter: 0.05
+  max_text_len: 25
+
+data:
+  type: synth_static
+  length: 200000
+  background_dir: null
+  synth:
+    width: 512
+    height: 512
+    min_words: 6
+    max_words: 20
+    min_font_size: 10
+    max_font_size: 48
+    curve_prob: 0.25
+  clip:
+    clip_len: 1
+    max_text_len: 25
+  aug:
+    crop_size: [512, 512]
+    short_side: 512
+    scale_range: [0.7, 1.6]
+    rotate_deg: 8.0
+
+train:
+  epochs: 40
+  steps_per_epoch: 500      # ~1 checkpoint every few minutes; survives disconnects
+  batch_size: 8
+  workers: 2
+  lr: 0.001
+  warmup_steps: 2000
+  scheduler: cosine
+  grad_clip: 1.0
+  amp: true
+  ema_decay: 0.999
+  keep_last_n: 3
+  ckpt_dir: /content/drive/MyDrive/vtspot/stage1
+  weighting:
+    type: fixed
+    weights: {loss_det: 1.0, loss_rec: 1.0, loss_track: 0.0}

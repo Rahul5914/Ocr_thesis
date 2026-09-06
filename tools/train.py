@@ -38,6 +38,19 @@ from vtspot.models.spotter import build_model
 from vtspot.utils.charset import Charset
 
 
+def enable_tf32() -> None:
+    """Turn on TF32 matmul/conv paths (Ampere and later).
+
+    Roughly 1.5-2x on convolutions for a precision loss that is immaterial to
+    training.  Off by default in PyTorch for numerical-reproducibility reasons;
+    for training a detector it is simply free speed.
+    """
+    if torch.cuda.is_available():
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -87,7 +100,12 @@ def main() -> int:
     ap.add_argument("--steps-per-epoch", type=int, default=None)
     ap.add_argument("--batch-size", type=int, default=None)
     ap.add_argument("--ckpt-dir", default=None)
+    ap.add_argument("--no-tf32", action="store_true",
+                    help="disable TF32 matmul/conv (Ampere+); slower but bit-exact")
     args = ap.parse_args()
+
+    if not args.no_tf32:
+        enable_tf32()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
     set_seed(cfg.get("seed", 0))
@@ -95,6 +113,10 @@ def main() -> int:
     charset = Charset.build(cfg.get("charset", "alnum"),
                             case_sensitive=cfg.get("case_sensitive", False))
     print(f"charset: {charset.num_chars} chars -> {charset.ctc_num_classes} CTC classes")
+    if torch.cuda.is_available() and args.device.startswith("cuda"):
+        props = torch.cuda.get_device_properties(0)
+        print(f"gpu: {props.name}, {props.total_memory / 1e9:.1f} GB, "
+              f"bf16={'yes' if torch.cuda.is_bf16_supported() else 'no'}")
 
     dataset = build_dataset(cfg, charset)
     batch_size = args.batch_size or cfg["train"].get("batch_size", 2)

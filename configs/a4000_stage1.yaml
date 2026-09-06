@@ -1,0 +1,64 @@
+# Stage 1 for a single 16 GB GPU with no session limit (RTX A4000, A5000,
+# RTX 3090/4090, V100-16GB, P100).
+#
+# Tuned against configs/stage1_static.yaml for a dedicated server rather than a
+# notebook: full 640 crops, larger batch, more workers, and no steps_per_epoch
+# cap because nothing is going to disconnect you at hour 12.
+#
+# bf16 is the default AMP dtype on Ampere (A4000 included): same speed as fp16
+# with fp32's exponent range, so no loss scaling and no inf at step 300 -- worth
+# having when early from-scratch gradients are large.
+seed: 0
+charset: alnum
+case_sensitive: false
+
+model:
+  backbone_width: 48
+  backbone_layers: [2, 2, 2, 2]
+  norm: gn
+  fpn_channels: 256
+  rec_dim: 256
+  rec_layers: 2
+  embed_dim: 128
+  use_attention_branch: true
+  roi_jitter: 0.05
+  max_text_len: 25
+
+data:
+  type: synth_static
+  length: 300000
+  background_dir: null        # point at a folder of photos to narrow the domain gap
+  synth:
+    width: 640
+    height: 640
+    min_words: 6
+    max_words: 24
+    min_font_size: 10
+    max_font_size: 56
+    curve_prob: 0.25
+  clip:
+    clip_len: 1
+    max_text_len: 25
+  aug:
+    crop_size: [640, 640]
+    short_side: 640
+    scale_range: [0.7, 1.6]
+    rotate_deg: 8.0
+
+train:
+  epochs: 25
+  batch_size: 12              # ~9 GB of 16; drop to 8 if the card is shared
+  workers: 6                  # match to available CPU cores, not GPU
+  lr: 0.001
+  weight_decay: 0.01
+  warmup_steps: 2000
+  scheduler: cosine
+  grad_clip: 1.0
+  amp: true
+  amp_dtype: bf16
+  ema_decay: 0.999
+  keep_last_n: 5
+  ckpt_dir: checkpoints/a4000_stage1
+  weighting:
+    type: fixed
+    weights: {loss_det: 1.0, loss_rec: 1.0, loss_track: 0.0}
