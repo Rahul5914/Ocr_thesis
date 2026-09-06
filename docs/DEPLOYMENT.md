@@ -6,7 +6,8 @@ which matters because stage 1 is long by design.
 
 | Platform | GPU | Session limit | Verdict |
 |---|---|---|---|
-| **College/lab server over SSH** | whatever it has | none | **Best.** Full curriculum in one go |
+| **Your own machine** (RTX A4000 etc.) | yours alone | none | **Best.** See the local walkthrough in the README |
+| College/lab server over SSH | shared | none | Good. Watch for other users on the card |
 | Kaggle | P100 16 GB / 2×T4 | 12 h, 30 h/week | Good. Needs resume between sessions |
 | Colab free | T4 16 GB | ~12 h, idle disconnects | Workable. Needs resume + Drive |
 | Colab Pro | L4 / A100 | longer | Good |

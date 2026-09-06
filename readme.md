@@ -30,7 +30,7 @@ python tools/predict_video.py --checkpoint checkpoints/stage3/last.pt \
 
 ```bash
 pip install -r requirements.txt
-python -m pytest tests/ -q                                   # 100 tests, ~15 s
+python -m pytest tests/ -q                                   # 103 tests, ~20 s
 python tools/train.py --config configs/smoke.yaml --device cpu   # ~1 min, verifies the pipeline
 python tools/train.py --config configs/stage1_static.yaml        # real training
 ```
@@ -88,11 +88,251 @@ Plus: the He/Xavier formulas conflate variance with standard deviation; Fixup is
 described as 1 of its 4 required rules; and the charset — which decides the size
 of the output layer — is never specified.
 
-## Full walkthrough: training on a college GPU server
+## Full walkthrough: training locally on an RTX A4000
 
-End to end — SSH access, datasets, training, and getting results back into this
-repository. Written for a single 16 GB GPU (RTX A4000 or similar) reached over
-SSH. Platform comparison and memory tables are in
+For a machine you sit in front of (or remote-desktop into). If you are reaching
+a *shared* server over SSH instead, skip to
+[the server walkthrough](#full-walkthrough-training-on-a-remote-gpu-server) —
+the difference is real: on your own machine you control the drivers, nothing
+kills your session at hour 12, and you can watch rendered output directly.
+
+Works on **Linux, Windows and WSL2**. Windows-specific steps are marked.
+
+### Step 0 — Make the GPU visible
+
+The one genuine prerequisite. Everything else is pip.
+
+```bash
+nvidia-smi
+```
+
+You want to see `NVIDIA RTX A4000` and `16376MiB`. If the command is missing:
+
+- **Linux:** install the proprietary driver (`sudo ubuntu-drivers install` on
+  Ubuntu, or your distro's `nvidia-driver` package), then reboot.
+- **Windows:** install the **NVIDIA Studio Driver** for the A4000 from
+  nvidia.com. Studio over Game Ready — it is the validated branch for compute
+  workloads.
+
+**You do not need to install the CUDA Toolkit.** PyTorch wheels bundle their own
+CUDA runtime; a recent driver is all that is required. Installing a mismatched
+system toolkit is a common way to break an otherwise working setup.
+
+### Step 1 — Python and PyTorch
+
+Use Python **3.10–3.12**.
+
+```bash
+git clone https://github.com/Rahul5914/Ocr_thesis.git
+cd Ocr_thesis
+```
+
+**Linux / WSL2 / macOS:**
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+```
+
+**Windows (PowerShell):**
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+# if PowerShell blocks the script:
+#   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+Then, on every platform — **install the CUDA build of PyTorch first**, because
+the default PyPI wheel on Windows is CPU-only and will silently train ~50×
+slower:
+
+```bash
+pip install --upgrade pip
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements.txt
+```
+
+Confirm the GPU is actually being used — not just present:
+
+```bash
+python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+
+Expect `True` and `NVIDIA RTX A4000`. **If it prints `False`, stop and fix it**
+— training will otherwise run on CPU at roughly 1% of the speed and appear
+merely "slow" rather than misconfigured.
+
+### Step 2 — Verify the install
+
+```bash
+python -m pytest tests/ -q                                       # ~20 s, 103 tests
+python -c "from vtspot.data.synth_static import discover_fonts; print(len(discover_fonts()), 'fonts')"
+python tools/train.py --config configs/smoke.yaml --device cpu   # ~1 min
+```
+
+Fonts: Windows contributes its `C:\Windows\Fonts` collection automatically, and
+matplotlib's bundled 40 faces are a fallback everywhere. More fonts is one of
+the cheapest ways to improve recognition generalisation — on Linux,
+`sudo apt install fonts-dejavu fonts-liberation fonts-freefont-ttf`.
+
+### Step 3 — Datasets (optional to start)
+
+**Stages 1 and 2 need no downloads.** Data is generated procedurally. Go to
+Step 4 and add real data later.
+
+For stage 3, get **ICDAR2015-video** ([rrc.cvc.uab.es](https://rrc.cvc.uab.es/?ch=3),
+free account). Since you are local, just download into a folder and convert:
+
+```bash
+python tools/prepare_dataset.py --dataset icdar15_video \
+    --videos      D:/datasets/icdar15/videos \
+    --annotations D:/datasets/icdar15/gt \
+    --out         D:/datasets/prepared/icdar15_video_train
+```
+
+**Read the last line of the output.** It compares parsed text density against
+the published figure:
+
+```
+mean instances/frame: 5.3 (published ~5.5) -> plausible
+```
+
+`SUSPICIOUS` means the parser matched the wrong format variant, and every number
+you produce afterwards is meaningless. Nothing downstream can detect it.
+
+> **Windows note:** if you point `--frames` at already-extracted frames, Windows
+> refuses to create the symlink used to keep the prepared folder self-contained
+> (it needs Administrator or Developer Mode). This is handled: the source path
+> is recorded in the annotation instead and the loader reads from there. You do
+> not need to run as admin.
+
+### Step 4 — Train
+
+```bash
+python tools/train.py --config configs/a4000_stage1.yaml
+```
+
+Then:
+
+```bash
+# Stage 2 -- synthetic video; the tracking loss switches on here
+python tools/train.py --config configs/a4000_stage2.yaml \
+    --init checkpoints/a4000_stage1/last.pt
+
+# Stage 3 -- real video fine-tune (needs Step 3)
+python tools/train.py --config configs/stage3_finetune.yaml \
+    --init checkpoints/a4000_stage2/last.pt --ckpt-dir checkpoints/stage3
+```
+
+The configs are already sized for a 16 GB A4000 and enable two Ampere features:
+**bf16 autocast** (fp32's exponent range, so no loss scaling and no `inf` at step
+300 — worth having when early from-scratch gradient norms hit 50–80) and **TF32**
+convolutions (~1.5–2× for immaterial precision loss).
+
+Since the GPU is all yours, `batch_size: 12` (~9 GB of 16) is safe. Set
+`workers` to match your **CPU** cores, not the GPU — synthesis is CPU-bound at
+~17 images/s/core, so on a 6-core desktop the dataloader, not the A4000, is your
+bottleneck. Check with `nproc` (Linux) or `echo %NUMBER_OF_PROCESSORS%`
+(Windows), then `--workers` to about `cores - 2`.
+
+Stage 1 runs **1–3 days**. Keep the machine awake:
+
+- **Windows:** Settings → System → Power → *Screen and sleep* → **Never** sleep.
+  A desktop that sleeps mid-run costs you the elapsed hours.
+- **Linux:** `systemd-inhibit --what=sleep python tools/train.py ...`, or run
+  inside `tmux` so a closed terminal does not kill it.
+
+**Anything interrupts it?** Every stage resumes:
+
+```bash
+python tools/train.py --config configs/a4000_stage1.yaml \
+    --resume checkpoints/a4000_stage1/last.pt
+```
+
+**Monitoring**, in a second terminal:
+
+```bash
+nvidia-smi -l 5              # utilisation and VRAM; low util = raise --workers
+python -c "import json; h=json.load(open('checkpoints/a4000_stage1/history.json')); [print('ep%3d det=%.3f rec=%.3f grad=%.1f' % (e['epoch'],e['loss_det'],e['loss_rec'],e['grad_norm'])) for e in h[-10:]]"
+```
+
+`loss_det` should fall steadily; `loss_binary` pinned at 1.0 early is normal;
+`grad_norm` of 50–80 on the first steps is expected from random init and should
+fall below ~5 within a few hundred steps. Full table in
+[`docs/TRAINING_GUIDE.md`](docs/TRAINING_GUIDE.md).
+
+### Step 5 — Run it on a video and watch the result
+
+The advantage of being local — you can just open the output:
+
+```bash
+python tools/predict_video.py \
+    --checkpoint checkpoints/a4000_stage2/last.pt \
+    --video my_clip.mp4 --out results.json --render annotated.mp4
+```
+
+`annotated.mp4` has boxes, track ids and transcriptions burned in. Evaluate
+against a benchmark with:
+
+```bash
+python tools/evaluate.py --checkpoint checkpoints/stage3/last.pt \
+    --data D:/datasets/prepared/icdar15_video_test --out results.json
+```
+
+It prints **tracking mode** (IoU only) and **spotting mode** (IoU + correct
+transcription). Quote the spotting numbers against video-text-*spotting*
+literature — conflating the two is the most common way these benchmarks get
+misreported.
+
+### Step 6 — Push results back to GitHub
+
+Authenticate once (HTTPS with a personal access token is simplest on a personal
+machine; `gh auth login` handles it, or use an SSH key as in the server
+walkthrough):
+
+```bash
+git config user.name  "Rahul Kumar"
+git config user.email "115581302+Rahul5914@users.noreply.github.com"
+
+git checkout -b results/a4000-local
+./scripts/collect_results.sh a4000_stage1 checkpoints/a4000_stage1
+./scripts/collect_results.sh stage3_icdar15 checkpoints/stage3 results.json
+git add experiments/ && git commit -m "Add A4000 training results"
+git push -u origin results/a4000-local
+```
+
+**On Windows**, `collect_results.sh` needs a bash shell — use Git Bash (ships
+with Git for Windows) or WSL2. Or copy the four files by hand: `config.yaml` and
+`history.json` from the checkpoint directory, plus your `results.json`.
+
+**Do not commit checkpoints.** They are 195 MB each and `.gitignore` blocks
+`*.pt` deliberately. Share weights via a GitHub Release (2 GB/file) instead:
+
+```bash
+gh release create v0.1-stage3 checkpoints/stage3/last.pt \
+    --notes "Stage 3, ICDAR15-video fine-tuned, RTX A4000"
+```
+
+Then open a pull request into `main`, or merge locally with `git merge --no-ff`.
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `torch.cuda.is_available()` is `False` | CPU-only wheel. Reinstall with `--index-url https://download.pytorch.org/whl/cu124` |
+| `CUDA out of memory` | Lower `crop_size` first, then `backbone_width`, then `batch_size`. **Keep `clip_len >= 3`** — it is load-bearing for the tracking loss |
+| GPU utilisation < 40% | Dataloader-bound. Raise `workers`; if already at core count, lower `crop_size` |
+| Training crawls, GPU idle | Almost always the CPU-only wheel — recheck Step 1 |
+| `no TrueType fonts found` | Should not happen (matplotlib fallback). If it does, drop `.ttf` files into `~/.fonts` |
+| Windows: `symlink` / WinError 1314 | Already handled — see the note in Step 3 |
+| Windows: DataLoader hangs at start | Set `workers: 0` in the config to confirm, then raise gradually; Windows spawns rather than forks, so worker startup is much slower |
+
+---
+
+## Full walkthrough: training on a remote GPU server
+
+For a **shared machine reached over SSH** (a college cluster or lab box). If the
+GPU is in a computer you have direct access to, use the
+[local walkthrough](#full-walkthrough-training-locally-on-an-rtx-a4000) above
+instead. Platform comparison and memory tables are in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ### Step 0 — Survey the server
@@ -169,7 +409,7 @@ git config user.email "115581302+Rahul5914@users.noreply.github.com"
 **Verify before you commit GPU days to it:**
 
 ```bash
-python -m pytest tests/ -q                                        # ~15 s, 100 tests
+python -m pytest tests/ -q                                        # ~20 s, 103 tests
 python -c "from vtspot.data.synth_static import discover_fonts; print(len(discover_fonts()), 'fonts')"
 python tools/train.py --config configs/smoke.yaml --device cpu    # ~1 min
 ```
@@ -359,7 +599,7 @@ git push origin main
 when the branch represents a body of work rather than a single fix.
 
 **Before merging, from a clean checkout:** `python -m pytest tests/ -q` should
-report 100 passed.
+report 103 passed.
 
 ---
 
@@ -380,7 +620,7 @@ notebooks/     train_colab_kaggle.ipynb
 scripts/       train_slurm.sh, collect_results.sh
 experiments/   committed run results (configs, loss history, metrics)
 docs/          RESEARCH_REVIEW, DATASETS, TRAINING_GUIDE, DEPLOYMENT
-tests/         100 tests
+tests/         103 tests
 ```
 
 ## Documentation
@@ -397,7 +637,7 @@ tests/         100 tests
 ## Status
 
 The pipeline is complete and verified end to end: training, inference,
-evaluation, and 100 passing tests including a from-scratch overfit test that
+evaluation, and 103 passing tests including a from-scratch overfit test that
 confirms all three heads learn. **No benchmark run has been performed** — that
 needs GPU hours and the licensed datasets. Published numbers should come from
 your own run of `tools/evaluate.py`; the measurements quoted above are unit-level

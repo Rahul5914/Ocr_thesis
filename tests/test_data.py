@@ -9,7 +9,8 @@ from PIL import ImageFont
 from vtspot.data.converters import icdar_video, json_video, roadtext
 from vtspot.data.converters.common import validate_annotation
 from vtspot.data.dataset import (ClipConfig, SyntheticStaticDataset,
-                                 SyntheticVideoDataset, collate_clips)
+                                 SyntheticVideoDataset, VideoClipDataset,
+                                 collate_clips)
 from vtspot.data.schema import VideoAnnotation, normalise_text
 from vtspot.data.synth_static import (SynthConfig, SyntheticImageGenerator,
                                       discover_fonts, render_word_layer)
@@ -263,3 +264,88 @@ def test_schema_roundtrip(tmp_path):
     ann.to_json(tmp_path / "annotations" / "v.json")
     back = VideoAnnotation.from_json(tmp_path / "annotations" / "v.json")
     assert back.stats() == ann.stats()
+
+
+def _make_frame_dataset(tmp_path):
+    src = tmp_path / "raw" / "frames" / "vid1"
+    src.mkdir(parents=True)
+    for i in range(3):
+        cv2.imwrite(str(src / f"{i:06d}.jpg"), np.full((120, 160, 3), 128, np.uint8))
+    gt = tmp_path / "raw" / "gt"
+    gt.mkdir(parents=True)
+    (gt / "vid1.json").write_text(json.dumps(
+        {str(i): [{"points": [10, 10, 60, 12, 60, 30, 10, 28], "ID": 1,
+                   "transcription": "CAFE"}] for i in range(3)}))
+    return src, gt
+
+
+def _run_prepare(tmp_path, out, refuse_symlinks):
+    import importlib.util
+    import sys
+    from pathlib import Path
+    from unittest import mock
+
+    spec = importlib.util.spec_from_file_location(
+        "pd", str(Path(__file__).resolve().parents[1] / "tools" / "prepare_dataset.py"))
+    pd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pd)
+    _, gt = _make_frame_dataset(tmp_path)
+    argv = ["prepare_dataset.py", "--dataset", "dstext",
+            "--frames", str(tmp_path / "raw" / "frames"),
+            "--annotations", str(gt), "--out", str(out)]
+    with mock.patch.object(sys, "argv", argv), mock.patch("builtins.print"):
+        if refuse_symlinks:
+            # WinError 1314: "A required privilege is not held by the client" --
+            # what Windows returns for symlink creation without Developer Mode.
+            with mock.patch.object(Path, "symlink_to",
+                                   side_effect=OSError(1314, "privilege not held")):
+                pd.main()
+        else:
+            pd.main()
+
+
+def _load_first_clip(root):
+    cs = Charset.from_preset("alnum")
+    ds = VideoClipDataset(root, cs, clip_cfg=ClipConfig(clip_len=2),
+                          aug_cfg=AugConfig(crop_size=(96, 96), short_side=96,
+                                            max_long_side=160))
+    return ds[0]
+
+
+def test_prepare_uses_symlink_when_permitted(tmp_path):
+    out = tmp_path / "prepared"
+    _run_prepare(tmp_path, out, refuse_symlinks=False)
+    ann = VideoAnnotation.from_json(out / "annotations" / "vid1.json")
+    assert (out / "frames" / "vid1").is_symlink()
+    assert ann.frames_dir == ""
+    assert (ann.width, ann.height) == (160, 120)
+    assert float(_load_first_clip(out)["images"].abs().sum()) > 0
+
+
+def test_prepare_falls_back_when_symlinks_are_refused(tmp_path):
+    """Windows rejects symlink creation without admin rights or Developer Mode.
+
+    Copying every frame of every video is not an acceptable fallback, so the
+    source directory is recorded in the annotation and the loader reads from
+    there instead.
+    """
+    out = tmp_path / "prepared"
+    _run_prepare(tmp_path, out, refuse_symlinks=True)
+    ann = VideoAnnotation.from_json(out / "annotations" / "vid1.json")
+    assert not (out / "frames" / "vid1").is_symlink()
+    assert ann.frames_dir.endswith("vid1")
+    # frame size must still be detected -- it is read from the source directory
+    assert (ann.width, ann.height) == (160, 120)
+    assert float(_load_first_clip(out)["images"].abs().sum()) > 0
+
+
+def test_font_search_skips_undefined_platform_dirs(monkeypatch):
+    from vtspot.data.synth_static import _font_search_dirs
+    monkeypatch.delenv("WINDIR", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    assert not any("Microsoft" in d for d in _font_search_dirs())
+    monkeypatch.setenv("WINDIR", r"C:\Windows")
+    monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\u\AppData\Local")
+    dirs = _font_search_dirs()
+    assert any(d.startswith(r"C:\Windows") for d in dirs)
+    assert any("Microsoft" in d for d in dirs)

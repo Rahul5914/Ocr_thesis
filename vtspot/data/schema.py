@@ -85,6 +85,7 @@ class VideoAnnotation:
     frames: List[Frame] = field(default_factory=list)
     fps: float = 30.0
     source: str = "unknown"
+    frames_dir: str = ""      # absolute path to frames, when not under <root>/frames
 
     def to_json(self, path: str | Path) -> None:
         path = Path(path)
@@ -96,6 +97,7 @@ class VideoAnnotation:
         d = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(video_id=d["video_id"], width=int(d["width"]), height=int(d["height"]),
                    fps=float(d.get("fps", 30.0)), source=d.get("source", "unknown"),
+                   frames_dir=d.get("frames_dir", ""),
                    frames=[Frame.from_dict(f) for f in d.get("frames", [])])
 
     def num_tracks(self) -> int:

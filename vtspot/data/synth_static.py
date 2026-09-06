@@ -27,6 +27,7 @@ pipeline runs without it.
 from __future__ import annotations
 
 import math
+import os
 import random
 import string
 from dataclasses import dataclass
@@ -37,10 +38,30 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-FONT_SEARCH_DIRS = [
-    "/usr/share/fonts", "/usr/local/share/fonts", "/Library/Fonts",
-    "/System/Library/Fonts", str(Path.home() / ".fonts"),
-]
+def _font_search_dirs() -> List[str]:
+    """Platform font directories, skipping ones this OS does not define.
+
+    Windows entries are built from %WINDIR% and %LOCALAPPDATA% (the latter holds
+    per-user fonts installed without admin rights).  Both are omitted when the
+    variable is unset, so a Linux box does not end up searching a stray relative
+    path called "Microsoft/Windows/Fonts".
+    """
+    dirs = [
+        # Linux
+        "/usr/share/fonts", "/usr/local/share/fonts", str(Path.home() / ".fonts"),
+        # macOS
+        "/Library/Fonts", "/System/Library/Fonts",
+    ]
+    windir = os.environ.get("WINDIR")
+    if windir:
+        dirs.append(os.path.join(windir, "Fonts"))
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        dirs.append(os.path.join(local, "Microsoft", "Windows", "Fonts"))
+    return dirs
+
+
+FONT_SEARCH_DIRS = _font_search_dirs()
 
 
 def _matplotlib_font_dir() -> Optional[str]:

@@ -4,6 +4,8 @@ These are slower than the unit tests (a minute or so on CPU) but they are the
 ones that catch the failures that matter -- a loss that is wired to the wrong
 tensor, a head that receives no gradient, a schedule that never warms up.
 """
+import tempfile
+
 import numpy as np
 import pytest
 import torch
@@ -56,7 +58,7 @@ def test_all_three_heads_learn_on_a_fixed_set():
     trainer = Trainer(_tiny_model(charset),
                       TrainConfig(epochs=12, lr=2e-3, warmup_steps=10, amp=False,
                                   ema_decay=0.0, db_k_warmup_steps=100,
-                                  ckpt_dir="/tmp/vtspot_test"),
+                                  ckpt_dir=tempfile.mkdtemp()),
                       device="cpu")
     trainer.scheduler = build_scheduler("cosine", trainer.optimizer, 10, 12 * len(loader))
 
@@ -92,7 +94,7 @@ def test_full_pipeline_runs_and_evaluates():
     model = _tiny_model(charset)
     loader = _fixed_loader(charset, repeats=8)
     trainer = Trainer(model, TrainConfig(epochs=1, lr=2e-3, warmup_steps=5, amp=False,
-                                         ema_decay=0.0, ckpt_dir="/tmp/vtspot_test"),
+                                         ema_decay=0.0, ckpt_dir=tempfile.mkdtemp()),
                       device="cpu")
     trainer.scheduler = warmup_cosine(trainer.optimizer, 5, 40)
     for _ in range(6):
@@ -147,7 +149,7 @@ def test_checkpoint_roundtrip(tmp_path):
 def test_non_finite_loss_is_skipped_not_propagated():
     charset = Charset.from_preset("alnum")
     model = _tiny_model(charset)
-    trainer = Trainer(model, TrainConfig(amp=False, ckpt_dir="/tmp/vtspot_test"))
+    trainer = Trainer(model, TrainConfig(amp=False, ckpt_dir=tempfile.mkdtemp()))
     before = [p.detach().clone() for p in model.parameters()]
 
     trainer.compute_losses = lambda b, o: {"loss_det": torch.tensor(float("nan")),

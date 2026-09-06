@@ -96,14 +96,27 @@ def main() -> int:
         video_id = stem_key((video or frames_src).name)
         dest = out / "frames" / video_id
 
+        frames_dir = ""
         if video is not None:
             n = extract_frames(video, dest, max_frames=args.max_frames)
+            probe = dest
         else:
+            # Prefer a symlink so the prepared root is self-contained, but fall
+            # back to recording the source path.  Windows rejects symlinks
+            # without Administrator rights or Developer Mode, and copying every
+            # frame of every video is not a reasonable alternative.
             dest.parent.mkdir(parents=True, exist_ok=True)
+            probe = frames_src
             if not dest.exists():
-                dest.symlink_to(frames_src.resolve(), target_is_directory=True)
-            n = len(list(dest.glob("*.jpg")))
-        width, height = frame_size(dest)
+                try:
+                    dest.symlink_to(frames_src.resolve(), target_is_directory=True)
+                    probe = dest
+                except (OSError, NotImplementedError):
+                    frames_dir = str(frames_src.resolve())
+            else:
+                probe = dest
+            n = len(list(probe.glob("*.jpg")))
+        width, height = frame_size(probe)
 
         if args.dataset in ("icdar13_video", "icdar15_video"):
             ann = icdar_video.convert(ann_path, video_id, width, height,
@@ -114,6 +127,7 @@ def main() -> int:
             ann = json_video.convert(ann_path, video_id, width, height, args.dataset,
                                      fps=args.fps, frame_offset=args.frame_offset,
                                      non_latin_as_ignore=not args.keep_non_latin)
+        ann.frames_dir = frames_dir
         ann.to_json(out / "annotations" / f"{video_id}.json")
 
         problems = validate_annotation(ann)

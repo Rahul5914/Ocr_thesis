@@ -180,7 +180,13 @@ class VideoClipDataset(Dataset):
         return len(self.index)
 
     def _frame_path(self, video: VideoAnnotation, frame_idx: int) -> Path:
-        return self.root / "frames" / video.video_id / f"{frame_idx:06d}.jpg"
+        # `frames_dir` lets frames live outside the prepared root.  Windows
+        # refuses to create symlinks without Administrator rights or Developer
+        # Mode, so prepare_dataset.py records the source directory there instead
+        # of linking to it -- and copying whole videos of frames is not an
+        # acceptable fallback.
+        base = Path(video.frames_dir) if video.frames_dir else self.root / "frames" / video.video_id
+        return base / f"{frame_idx:06d}.jpg"
 
     def __getitem__(self, i: int) -> Dict[str, torch.Tensor]:
         vi, start = self.index[i]
