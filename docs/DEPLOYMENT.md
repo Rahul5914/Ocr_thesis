@@ -40,8 +40,7 @@ generator falls back to the ~40 TrueType fonts bundled with matplotlib, which is
 present in every scientific Python install.
 
 ```bash
-git clone -b claude/video-text-spotting-model-3ms4y1 \
-    https://github.com/Rahul5914/Ocr_thesis.git && cd Ocr_thesis
+git clone https://github.com/Rahul5914/Ocr_thesis.git && cd Ocr_thesis
 
 python -m venv .venv && source .venv/bin/activate     # or: conda create -n vtspot python=3.11
 pip install -r requirements.txt

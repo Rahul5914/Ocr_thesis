@@ -464,8 +464,7 @@ ssh -T git@github.com        # expect: "Hi <user>! You've successfully authentic
 
 ```bash
 cd /scratch/$USER          # or wherever you have space
-git clone -b claude/video-text-spotting-model-3ms4y1 \
-    git@github.com:Rahul5914/Ocr_thesis.git
+git clone git@github.com:Rahul5914/Ocr_thesis.git
 cd Ocr_thesis
 
 python3 -m venv .venv && source .venv/bin/activate    # or conda create -n vtspot python=3.11
@@ -630,7 +629,7 @@ That writes `experiments/<name>/` containing `SUMMARY.md`, `config.yaml`,
 ```bash
 git add experiments/
 git commit -m "Add stage 1-3 training results from college server (A4000)"
-git push origin claude/video-text-spotting-model-3ms4y1
+git push origin main
 ```
 
 **Shipping the weights themselves** — pick one:
