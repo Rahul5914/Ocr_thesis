@@ -247,9 +247,39 @@ you produce afterwards is meaningless. Nothing downstream can detect it.
 
 ### Step 4 — Train
 
-```bash
-python tools/train.py --config configs/a4000_stage1.yaml
+**Windows: use the helper script.** It picks the config and — the reason it
+exists — **resumes from `last.pt` automatically** when one is present. A closed
+terminal or a reboot then costs only the steps since the last checkpoint, not
+the run. It calls `.venv\Scripts\python.exe` directly, so no `Activate.ps1` and
+no execution-policy change are involved.
+
+```powershell
+.\scripts\train.ps1                 # stage 1, resumes if a checkpoint exists
+.\scripts\train.ps1 -Stage 2        # stage 2, initialised from stage 1
+.\scripts\train.ps1 -Workers 8      # override the worker count
+.\scripts\train.ps1 -Fresh          # ignore the checkpoint and start over
 ```
+
+By hand, on any platform:
+
+```bash
+python tools/train.py --config configs/a4000_stage1_fast.yaml
+# after any interruption:
+python tools/train.py --config configs/a4000_stage1_fast.yaml \
+    --resume checkpoints/a4000_stage1/last.pt
+```
+
+**Check the speed before committing days to it.** `a4000_stage1.yaml` measured
+~230 h on a real A4000; `a4000_stage1_fast.yaml` targets ~1 day. If throughput
+looks wrong, measure rather than guess:
+
+```bash
+python tools/benchmark.py --config configs/a4000_stage1_fast.yaml
+```
+
+It times the dataloader and the GPU separately and names the bottleneck. The two
+fixes are opposites — more workers help only if the GPU is starved, a smaller
+crop or model only if it is not.
 
 Then:
 
