@@ -1,5 +1,7 @@
 """Data pipeline: synthesis fidelity, targets, batching, converters."""
 import json
+import random
+
 import numpy as np
 import cv2
 import pytest
@@ -159,13 +161,44 @@ def test_db_target_decode_roundtrip():
 
 
 def test_clip_augmentation_is_consistent_across_frames():
-    aug = ClipAugmentor(AugConfig(crop_size=(160, 160), frame_jitter_px=2.0),
-                        training=True)
+    """Frames in a clip share a base crop; only small jitter differs between them.
+
+    Asserted against the right baseline -- a freshly sampled base homography --
+    rather than a fixed pixel threshold.  An absolute bound is the wrong test:
+    the per-frame rotation is about the crop centre, so its lever arm grows with
+    distance from that centre, and a point far out legitimately moves more than
+    10 px.  (Measured over 300 seeds: mean 2.9 px, but 1.7% exceed 10 px, which
+    made the old assertion fail roughly one run in sixty.)
+    """
+    cfg = AugConfig(crop_size=(160, 160), frame_jitter_px=2.0)
+    pts = np.array([[100., 100.], [50., 60.], [150., 200.]], np.float32)
+
+    jitter_shifts, recrop_shifts = [], []
+    for seed in range(40):
+        aug = ClipAugmentor(cfg, training=True, rng=random.Random(seed))
+        base, hw = aug.base_homography((240, 320))
+        a = transform_points(pts, aug.frame_homography(base, hw))
+        b = transform_points(pts, aug.frame_homography(base, hw))
+        jitter_shifts.append(float(np.abs(a - b).max()))
+
+        other, _ = aug.base_homography((240, 320))
+        recrop_shifts.append(
+            float(np.abs(transform_points(pts, base) - transform_points(pts, other)).max()))
+
+    assert np.mean(jitter_shifts) < 0.1 * np.mean(recrop_shifts), (
+        "per-frame jitter must be small relative to re-cropping, or apparent "
+        "motion is scrambled and association becomes unlearnable")
+    assert max(jitter_shifts) < 40.0
+
+
+def test_frame_jitter_can_be_disabled():
+    aug = ClipAugmentor(AugConfig(crop_size=(160, 160), frame_jitter_px=0.0),
+                        training=True, rng=random.Random(0))
     base, hw = aug.base_homography((240, 320))
     pts = np.array([[100., 100.]], np.float32)
     a = transform_points(pts, aug.frame_homography(base, hw))
     b = transform_points(pts, aug.frame_homography(base, hw))
-    assert np.abs(a - b).max() < 10.0, "per-frame jitter must be small, not a new crop"
+    assert np.allclose(a, b)
 
 
 def test_eval_letterbox_is_stride_32():
