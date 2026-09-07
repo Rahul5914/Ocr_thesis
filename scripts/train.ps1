@@ -26,7 +26,15 @@ if (-not (Test-Path $py)) {
     Write-Host "    .venv\Scripts\python.exe -m pip install -r requirements.txt"
     exit 1
 }
-# Calling python.exe directly needs no Activate.ps1 and no execution policy change.
+# Calling python.exe directly needs no Activate.ps1 and no execution policy
+# change -- and, more usefully, it ignores whatever venv happens to be active.
+# VS Code auto-activates any environment it finds on the machine, so a prompt
+# reading (some_other_env) is common and would otherwise run a Python with none
+# of this project's packages installed.
+if ($env:VIRTUAL_ENV -and ($env:VIRTUAL_ENV -notlike "*$((Get-Location).Path)*")) {
+    Write-Host "Note: '$env:VIRTUAL_ENV' is active, but this script uses the project's" -ForegroundColor Yellow
+    Write-Host "      .venv regardless -- no need to deactivate anything.`n" -ForegroundColor Yellow
+}
 
 # --- config -------------------------------------------------------------
 if ($Config -eq "") {
