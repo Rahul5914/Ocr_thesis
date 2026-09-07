@@ -40,7 +40,7 @@ if ($env:VIRTUAL_ENV -and ($env:VIRTUAL_ENV -notlike "*$((Get-Location).Path)*")
 if ($Config -eq "") {
     $Config = switch ($Stage) {
         1 { "configs\a4000_stage1_fast.yaml" }
-        2 { "configs\a4000_stage2.yaml" }
+        2 { "configs\a4000_stage2_fast.yaml" }
         3 { "configs\stage3_finetune.yaml" }
         default { throw "unknown stage $Stage" }
     }

@@ -1,0 +1,73 @@
+# Stage 2, sized to finish in about a day -- the companion to a4000_stage1_fast.
+#   .\scripts\train.ps1 -Stage 2        (Windows)
+#   python tools/train.py --config configs/a4000_stage2_fast.yaml \
+#       --init checkpoints/a4000_stage1/last.pt
+#
+# The full a4000_stage2.yaml is 533,000 steps -- about 74 h at the ~2 it/s an
+# A4000 actually delivers. This targets 150,000, matching stage 1.
+#
+# batch_size 3 x clip_len 4 = 12 images per step, about the same activation
+# footprint as stage 1's batch of 12 stills.  clip_len must stay >= 3: below
+# that the contrastive loss has no meaningful long-range positives and the
+# association head does not learn.
+seed: 0
+charset: alnum
+case_sensitive: false
+
+model:
+  backbone_width: 48
+  backbone_layers: [2, 2, 2, 2]
+  norm: gn
+  fpn_channels: 256
+  rec_dim: 256
+  rec_layers: 2
+  embed_dim: 128
+  use_attention_branch: true
+  roi_jitter: 0.08
+  max_text_len: 25
+
+data:
+  type: synth_video
+  length: 80000
+  background_dir: null
+  synth:
+    width: 960
+    height: 540
+    num_frames: 12
+    min_instances: 6
+    max_instances: 16
+    cam_translate: 6.0
+    instance_prob_moving: 0.4
+    motion_blur: true
+    num_occluders: 2
+    occluder_prob: 0.6
+  clip:
+    clip_len: 4
+    frame_stride: 2
+    random_stride: true
+    max_text_len: 25
+  aug:
+    crop_size: [512, 512]
+    short_side: 640
+    scale_range: [0.6, 1.6]
+    rotate_deg: 6.0
+    frame_jitter_px: 2.0
+
+train:
+  epochs: 60
+  steps_per_epoch: 2500
+  batch_size: 3
+  workers: 6
+  lr: 0.0005
+  warmup_steps: 1000
+  scheduler: cosine
+  grad_clip: 1.0
+  amp: true
+  amp_dtype: bf16
+  ema_decay: 0.999
+  keep_last_n: 3
+  save_every_steps: 500
+  ckpt_dir: checkpoints/a4000_stage2
+  weighting:
+    type: fixed
+    weights: {loss_det: 1.0, loss_rec: 1.0, loss_track: 0.5}
