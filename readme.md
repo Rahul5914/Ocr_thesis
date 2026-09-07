@@ -382,7 +382,9 @@ gh release create v0.1-stage3 checkpoints/stage3/last.pt \
     --notes "Stage 3, ICDAR15-video fine-tuned, RTX A4000"
 ```
 
-Then open a pull request into `main`, or merge locally with `git merge --no-ff`.
+**Do you need a pull request?** Only if someone reviews your work. Working
+solo on your own repository, push straight to `main` — that is what the commands
+above do. A PR is a review checkpoint, not a requirement for saving code.
 
 ### Troubleshooting
 
@@ -651,21 +653,29 @@ gh release create v0.1-stage3 last.pt --notes "Stage 3, ICDAR15-video fine-tuned
 
 Once results are pushed and you're happy with them:
 
-```bash
-# keep the branch current with main first
-git fetch origin
-git merge origin/main            # resolve any conflicts, then re-run: pytest tests/ -q
-git push origin claude/video-text-spotting-model-3ms4y1
-```
-
-Then open a pull request on GitHub from
-`claude/video-text-spotting-model-3ms4y1` into `main`, or merge locally:
+**Working solo?** Commit on `main` and push. There is nothing to merge and no
+PR to open:
 
 ```bash
-git checkout main
-git merge --no-ff claude/video-text-spotting-model-3ms4y1
+git add experiments/
+git commit -m "Add A4000 training results"
 git push origin main
 ```
+
+**Used a branch** (worth it when a run might not pan out, so `main` stays
+clean)? Merge it when you are happy with the results:
+
+```bash
+git fetch origin
+git checkout <your-branch>
+git merge origin/main         # resolve conflicts, then re-run: pytest tests/ -q
+git checkout main
+git merge --no-ff <your-branch>
+git push origin main
+```
+
+A pull request is only needed when someone else reviews the change. `--no-ff`
+keeps the branch's commits visible as one unit rather than flattening them.
 
 `--no-ff` keeps the branch's history as a distinct unit, which is what you want
 when the branch represents a body of work rather than a single fix.
