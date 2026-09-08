@@ -28,7 +28,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from engines import build_engine
+from engines import PRESETS, DetectParams, build_engine
 from tracker import TextTracker
 from viz import annotate, draw_hud
 
@@ -48,13 +48,40 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--langs", default="en",
                    help="comma-separated language codes, e.g. en or en,hi")
     p.add_argument("--cpu", action="store_true", help="force CPU even if a GPU is present")
+    p.add_argument("--mode", default="pipeline", choices=["pipeline", "two_stage"],
+                   help="'pipeline' is the engine's own end-to-end call and reads "
+                        "better; 'two_stage' crops each detection and reads it "
+                        "alone, which is worse but shows which stage failed")
+
+    p.add_argument("--preset", default="default", choices=sorted(PRESETS),
+                   help="detector tuning; 'small-text' for distant road signage")
+    p.add_argument("--mag", type=float, default=None,
+                   help="upscale by this before detection (the knob for small text)")
+    p.add_argument("--low-text", type=float, default=None,
+                   help="lower = fainter strokes count as text")
+    p.add_argument("--text-threshold", type=float, default=None,
+                   help="lower = weaker regions count as text")
+    p.add_argument("--link", type=float, default=None,
+                   help="lower = neighbouring words merge into one box")
+    p.add_argument("--width-ths", type=float, default=None,
+                   help="higher = merge boxes that are further apart")
+    p.add_argument("--min-size", type=int, default=None,
+                   help="ignore detections smaller than this many pixels")
+    p.add_argument("--decoder", default=None, choices=["greedy", "beamsearch"],
+                   help="beamsearch is slower and a little more accurate")
+    p.add_argument("--merge-words", dest="merge_words", action="store_true",
+                   default=None,
+                   help="glue phrases the detector split ('SPEED'+'40' -> "
+                        "'SPEED 40'); costs per-box confidence, so --min-conf "
+                        "stops filtering and agreement counts frames instead")
 
     p.add_argument("--every", type=int, default=1,
                    help="run OCR on every Nth frame (1 = every frame)")
     p.add_argument("--max-frames", type=int, default=0,
                    help="stop after this many frames (0 = whole video)")
-    p.add_argument("--resize", type=int, default=1280,
-                   help="resize the long side to this before OCR (0 = no resize)")
+    p.add_argument("--resize", type=int, default=0,
+                   help="resize the long side to this before OCR (0 = native). "
+                        "Downscaling is a speed knob and it costs you small text")
 
     p.add_argument("--min-conf", type=float, default=0.30,
                    help="drop readings below this confidence")
@@ -104,9 +131,19 @@ def main(argv=None) -> int:
     print(f"          {meta['width']}x{meta['height']}  {meta['fps']:.1f} fps  "
           f"{meta['frames']} frames")
 
-    print(f"engine  : {args.engine} (first run downloads pretrained weights)")
+    params = DetectParams(**PRESETS[args.preset])
+    for name in ("mag", "low_text", "text_threshold", "link", "width_ths",
+                 "min_size", "decoder", "merge_words"):
+        value = getattr(args, name)
+        if value is not None:              # an explicit flag overrides the preset
+            setattr(params, name, value)
+
+    print(f"engine  : {args.engine}  mode={args.mode}  preset={args.preset}")
+    print(f"          mag={params.mag} low_text={params.low_text} "
+          f"link={params.link} min_size={params.min_size}")
+    print("          (first run downloads pretrained weights)")
     engine = build_engine(args.engine, [s.strip() for s in args.langs.split(",")],
-                          gpu=not args.cpu)
+                          gpu=not args.cpu, params=params)
 
     # Nothing to track in detect-only mode: tracks are keyed on readings.
     track_off = args.no_track or args.stage == "detect"
@@ -147,15 +184,22 @@ def main(argv=None) -> int:
                                 interpolation=cv2.INTER_AREA)
                      if scale != 1.0 else frame)
 
-            # ---- stage 1: where is the text? --------------------------------
-            polys = engine.detect(small)
-            n_detected += len(polys)
-
-            # ---- stage 2: what does it say? ---------------------------------
             if args.stage == "detect":
+                # ---- stage 1 only: where is the text? -----------------------
+                polys = engine.detect(small)
                 preds = []
+            elif args.mode == "pipeline":
+                # The engine runs both stages itself and returns boxes + text.
+                preds = engine.read(small)
+                polys = [p.poly for p in preds]
             else:
-                preds = [p for p in engine.recognize(small, polys)
+                # ---- stage 1: where? ---- then ---- stage 2: what? ----------
+                polys = engine.detect(small)
+                preds = engine.recognize(small, polys)
+
+            n_detected += len(polys)
+            if preds:
+                preds = [p for p in preds
                          if p.confidence >= args.min_conf
                          and len(p.text) >= args.min_chars]
                 n_read += len(preds)
