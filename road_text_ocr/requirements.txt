@@ -1,0 +1,12 @@
+# Core
+opencv-python>=4.8        # video I/O, warping, drawing
+numpy>=1.24
+
+# Default engine: CRAFT detector + CRNN recogniser, pure PyTorch.
+# Pulls torch itself; weights download on first run (~100 MB, cached in ~/.EasyOCR).
+easyocr>=1.7
+
+# Optional second engine (--engine paddleocr): DBNet + SVTR.
+# Often sharper on small text, but a heavier install -- uncomment if you want it.
+# paddlepaddle>=2.6
+# paddleocr>=2.7
